@@ -5,35 +5,50 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use SistemaTS\TsXmlBuilder;
 use SistemaTS\SistemaTsClient;
-use function SistemaTS\json_response;
 
+// Routing semplice
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path   = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
+// Health check per browser
 if ($method === 'GET' && $path === '/') {
-    // Risposta di salute per il browser
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode([
+    json_response([
         'status'   => 'OK',
         'endpoint' => '/',
         'message'  => 'Microservizio Sistema TS attivo',
-    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    exit;
+    ]);
 }
 
+// Endpoint principale: invio file TS
 if ($method === 'POST' && $path === '/invia') {
     handle_invia();
     exit;
 }
 
-// Tutto il resto: 404
+// Default 404
 http_response_code(404);
 header('Content-Type: text/plain; charset=utf-8');
 echo "Not Found";
+exit;
 
+/**
+ * Risposta JSON standard
+ */
+function json_response(array $data, int $status = 200): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+/**
+ * Gestione invio verso Sistema TS
+ */
 function handle_invia(): void
 {
     try {
+        // Input grezzo
         $raw = file_get_contents('php://input');
         if ($raw === false) {
             throw new RuntimeException('Cannot read request body');
@@ -44,20 +59,23 @@ function handle_invia(): void
             throw new RuntimeException('Invalid JSON');
         }
 
+        // Costruzione XML
         $builder = new TsXmlBuilder();
         $xml = $builder->buildXml($data);
 
-        // Salva XML temporaneo e crea ZIP
+        // Directory temporanea
         $tmpDir = sys_get_temp_dir() . '/ts_' . bin2hex(random_bytes(4));
         if (!mkdir($tmpDir, 0777, true) && !is_dir($tmpDir)) {
             throw new RuntimeException("Failed to create temp dir");
         }
 
+        // Percorsi file
         $xmlPath = $tmpDir . '/file01.xml';
         $zipPath = $tmpDir . '/file01.zip';
 
         file_put_contents($xmlPath, $xml);
 
+        // Creazione ZIP
         $zip = new ZipArchive();
         if ($zip->open($zipPath, ZipArchive::CREATE) !== true) {
             throw new RuntimeException("Cannot create ZIP file");
@@ -65,16 +83,21 @@ function handle_invia(): void
         $zip->addFile($xmlPath, 'file01.xml');
         $zip->close();
 
+        // Ambiente TEST/PROD
         $environment = ($data['environment'] ?? 'TEST') === 'PROD' ? 'PROD' : 'TEST';
 
+        // Client TS SOAP
         $client = new SistemaTsClient($environment);
         $result = $client->inviaFile($zipPath, 'file01.zip', $data);
 
+        // Risposta al frontend
         json_response([
             'status' => 'OK',
             'result' => $result,
         ]);
+
     } catch (Throwable $e) {
+
         json_response([
             'status'  => 'ERROR',
             'message' => $e->getMessage(),
