@@ -10,13 +10,26 @@ use function SistemaTS\json_response;
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path   = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 
+if ($method === 'GET' && $path === '/') {
+    // Risposta di salute per il browser
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'status'   => 'OK',
+        'endpoint' => '/',
+        'message'  => 'Microservizio Sistema TS attivo',
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 if ($method === 'POST' && $path === '/invia') {
     handle_invia();
-} else {
-    http_response_code(404);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo "Not Found";
+    exit;
 }
+
+// Tutto il resto: 404
+http_response_code(404);
+header('Content-Type: text/plain; charset=utf-8');
+echo "Not Found";
 
 function handle_invia(): void
 {
@@ -58,8 +71,8 @@ function handle_invia(): void
         $result = $client->inviaFile($zipPath, 'file01.zip', $data);
 
         json_response([
-            'status'   => 'OK',
-            'result'   => $result,
+            'status' => 'OK',
+            'result' => $result,
         ]);
     } catch (Throwable $e) {
         json_response([
